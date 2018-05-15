@@ -54,6 +54,7 @@ module Codec.CBOR.Magic
   , word64ToInt       -- :: Int64 -> Int
 
   , intToInt64        -- :: Int   -> Int64
+  , intToWord         -- :: Int   -> Word
 #if defined(ARCH_32bit)
   , word8ToInt64      -- :: Word8  -> Int64
   , word16ToInt64     -- :: Word16 -> Int64
@@ -376,6 +377,10 @@ word32ToWord64 :: Word32 -> Word64
 intToInt64 :: Int -> Int64
 intToInt64 = fromIntegral
 {-# INLINE intToInt64 #-}
+
+intToWord :: Int -> Word
+intToWord = fromIntegral
+{-# INLINE intToWord #-}
 
 word8ToWord  (W8#  w#) = W# w#
 word16ToWord (W16# w#) = W# w#

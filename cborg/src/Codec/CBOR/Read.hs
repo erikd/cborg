@@ -172,9 +172,6 @@ deserialiseIncremental decoder = do
 -- A monad for building incremental decoders
 --
 
--- | Simple alias for @'Int64'@, used to make types more descriptive.
-type ByteOffset = Int64
-
 newtype IncrementalDecoder s a = IncrementalDecoder {
        unIncrementalDecoder ::
          forall r. (a -> ST s (IDecode s r)) -> ST s (IDecode s r)
@@ -247,6 +244,7 @@ data SlowPath s a
    | SlowConsumeTokenByteArray     {-# UNPACK #-} !ByteString (BA.ByteArray -> ST s (DecodeAction s a)) {-# UNPACK #-} !Int
    | SlowConsumeTokenString        {-# UNPACK #-} !ByteString (T.Text       -> ST s (DecodeAction s a)) {-# UNPACK #-} !Int
    | SlowConsumeTokenUtf8ByteArray {-# UNPACK #-} !ByteString (BA.ByteArray -> ST s (DecodeAction s a)) {-# UNPACK #-} !Int
+   | SlowPeekByteOffset            {-# UNPACK #-} !ByteString (Word#        -> ST s (DecodeAction s a))
    | SlowDecodeAction              {-# UNPACK #-} !ByteString (DecodeAction s a)
    | SlowFail                      {-# UNPACK #-} !ByteString String
 
@@ -702,6 +700,7 @@ go_fast !bs (PeekTokenType k) =
 
 go_fast !bs (PeekAvailable k) = k (case BS.length bs of I# len# -> len#) >>= go_fast bs
 
+go_fast !bs da@PeekByteOffset{} = go_fast_end bs da
 go_fast !bs da@D.Fail{} = go_fast_end bs da
 go_fast !bs da@D.Done{} = go_fast_end bs da
 
@@ -720,6 +719,8 @@ go_fast_end :: ByteString -> DecodeAction s a -> ST s (SlowPath s a)
 go_fast_end !bs (D.Fail msg)      = return $! SlowFail bs msg
 go_fast_end !bs (D.Done x)        = return $! FastDone bs x
 go_fast_end !bs (PeekAvailable k) = k (case BS.length bs of I# len# -> len#) >>= go_fast_end bs
+
+go_fast_end !bs (PeekByteOffset k) = return $! SlowPeekByteOffset bs k
 
 -- the next two cases only need the 1 byte token header
 go_fast_end !bs da | BS.null bs = return $! SlowDecodeAction bs da
@@ -1211,36 +1212,36 @@ go_slow da bs !offset = do
   case slowpath of
     FastDone bs' x -> return (bs', offset', x)
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowConsumeTokenBytes bs' k len -> do
       (bstr, bs'') <- getTokenVarLen len bs' offset'
-      lift (k bstr) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+      lift (k bstr) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowConsumeTokenByteArray bs' k len -> do
       (bstr, bs'') <- getTokenVarLen len bs' offset'
       let !str = BA.fromByteString bstr
-      lift (k str) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+      lift (k str) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowConsumeTokenString bs' k len -> do
       (bstr, bs'') <- getTokenVarLen len bs' offset'
       case T.decodeUtf8' bstr of
         Right str -> lift (k str) >>= \daz ->
-                     go_slow daz bs'' (offset' + intToInt64 len)
+                     go_slow daz bs'' (offset' + intToWord len)
         Left _e   -> decodeFail bs' offset' "invalid UTF8"
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowConsumeTokenUtf8ByteArray bs' k len -> do
       (bstr, bs'') <- getTokenVarLen len bs' offset'
       let !str = BA.fromByteString bstr
-      lift (k str) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+      lift (k str) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     -- we didn't have enough input in the buffer
     SlowDecodeAction bs' da' | BS.null bs' -> do
@@ -1251,7 +1252,7 @@ go_slow da bs !offset = do
         Nothing   -> decodeFail bs' offset' "end of input"
         Just bs'' -> go_slow da' bs'' offset'
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowDecodeAction bs' da' ->
       -- of course we should only end up here when we really are out of
@@ -1259,11 +1260,16 @@ go_slow da bs !offset = do
       assert (BS.length bs' < tokenSize (BS.head bs')) $
       go_slow_fixup da' bs' offset'
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
+
+    SlowPeekByteOffset bs' k ->
+      lift (k off#) >>= \daz -> go_slow daz bs' offset'
+      where
+        !offset'@(W# off#) = offset + intToWord (BS.length bs - BS.length bs')
 
     SlowFail bs' msg -> decodeFail bs' offset' msg
       where
-        !offset' = offset + intToInt64 (BS.length bs - BS.length bs')
+        !offset' = offset + intToWord (BS.length bs - BS.length bs')
 
 -- The complicated case is when a token spans a chunk boundary.
 --
@@ -1311,7 +1317,7 @@ go_slow_overlapped da sz bs_cur bs_next !offset =
 
     let bs_tok   = bs_cur <> BS.unsafeTake (sz - BS.length bs_cur) bs_next
         bs'      =           BS.unsafeDrop (sz - BS.length bs_cur) bs_next
-        offset'  = offset + intToInt64 sz in
+        offset'  = offset + intToWord sz in
 
     -- so the token chunk should be exactly the right size
     assert (BS.length bs_tok == sz) $
@@ -1336,32 +1342,38 @@ go_slow_overlapped da sz bs_cur bs_next !offset =
       SlowConsumeTokenBytes bs_empty k len ->
         assert (BS.null bs_empty) $ do
         (bstr, bs'') <- getTokenShortOrVarLen bs' offset' len
-        lift (k bstr) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+        lift (k bstr) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
 
       SlowConsumeTokenByteArray bs_empty k len ->
         assert (BS.null bs_empty) $ do
         (bstr, bs'') <- getTokenShortOrVarLen bs' offset' len
         let !ba = BA.fromByteString bstr
-        lift (k ba) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+        lift (k ba) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
 
       SlowConsumeTokenString bs_empty k len ->
         assert (BS.null bs_empty) $ do
         (bstr, bs'') <- getTokenShortOrVarLen bs' offset' len
         case T.decodeUtf8' bstr of
           Right str -> lift (k str) >>= \daz ->
-                       go_slow daz bs'' (offset' + intToInt64 len)
+                       go_slow daz bs'' (offset' + intToWord len)
           Left _e   -> decodeFail bs' offset' "invalid UTF8"
 
       SlowConsumeTokenUtf8ByteArray bs_empty k len ->
         assert (BS.null bs_empty) $ do
         (bstr, bs'') <- getTokenShortOrVarLen bs' offset' len
         let !ba = BA.fromByteString bstr
-        lift (k ba) >>= \daz -> go_slow daz bs'' (offset' + intToInt64 len)
+        lift (k ba) >>= \daz -> go_slow daz bs'' (offset' + intToWord len)
+
+      SlowPeekByteOffset bs_empty k ->
+        assert (BS.null bs_empty) $ do
+        lift (k off#) >>= \daz -> go_slow daz bs' offset'
+        where
+          !(W# off#) = offset'
 
       SlowFail bs_unconsumed msg ->
         decodeFail (bs_unconsumed <> bs') offset'' msg
         where
-          !offset'' = offset + intToInt64 (sz - BS.length bs_unconsumed)
+          !offset'' = offset + intToWord (sz - BS.length bs_unconsumed)
   where
     {-# INLINE getTokenShortOrVarLen #-}
     getTokenShortOrVarLen :: BS.ByteString

@@ -68,8 +68,12 @@ module Codec.CBOR.Decoding
 
   -- ** Inspecting the token type
   , peekTokenType        -- :: Decoder s TokenType
-  , peekAvailable        -- :: Decoder s Int
   , TokenType(..)
+
+  -- ** Special operations
+  , peekAvailable        -- :: Decoder s Int
+  , peekByteOffset       -- :: Decoder s ByteOffset
+  , ByteOffset
 
   -- ** Canonical CBOR
   -- $canonical
@@ -100,12 +104,6 @@ module Codec.CBOR.Decoding
   , decodeSimpleCanonical  -- :: Decoder s Word8
   , decodeWordCanonicalOf    -- :: Word -> Decoder s ()
   , decodeListLenCanonicalOf -- :: Int  -> Decoder s ()
-
-{-
-  -- ** Special operations
-  , ignoreTerms
-  , decodeTrace
--}
 
   -- * Sequence operations
   , decodeSequenceLenIndef -- :: ...
@@ -219,6 +217,7 @@ data DecodeAction s a
 
     | PeekTokenType  (TokenType -> ST s (DecodeAction s a))
     | PeekAvailable  (Int#      -> ST s (DecodeAction s a))
+    | PeekByteOffset (Word#     -> ST s (DecodeAction s a))
 
     | Fail String
     | Done a
@@ -900,6 +899,27 @@ peekTokenType = Decoder (\k -> return (PeekTokenType (\tk -> k tk)))
 peekAvailable :: Decoder s Int
 peekAvailable = Decoder (\k -> return (PeekAvailable (\len# -> k (I# len#))))
 {-# INLINE peekAvailable #-}
+
+
+-- | An 0-based offset within the decoder's input byte sequence.
+--
+type ByteOffset = Word
+
+-- | Get the current 'ByteOffset' in the decoder's input byte sequence.
+--
+-- @since 0.2.1.0
+peekByteOffset :: Decoder s ByteOffset
+peekByteOffset = Decoder (\k -> return (PeekByteOffset (\off# -> k (W# off#))))
+{-# INLINE peekByteOffset #-}
+
+{-
+decodeWithByteSpan :: Decoder s a -> Decoder s (a, ByteOffset, ByteOffset)
+decodeWithByteSpan da = do
+    !before <- peekByteOffset
+    x <- da
+    !after  <- peekByteOffset
+    return (x, before, after)
+-}
 
 {-
 expectExactly :: Word -> Decoder (Word :#: s) s
