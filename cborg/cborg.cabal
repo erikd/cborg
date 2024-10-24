@@ -90,7 +90,7 @@ library
 
   build-depends:
     array                   >= 0.4     && < 0.6,
-    base                    >= 4.11    && < 4.21,
+    base                    >= 4.11    && < 4.22,
     bytestring              >= 0.10.4  && < 0.13,
     containers              >= 0.5     && < 0.8,
     deepseq                 >= 1.0     && < 1.6,
@@ -148,7 +148,7 @@ test-suite tests
 
   build-depends:
     array                   >= 0.4     && < 0.6,
-    base                    >= 4.11    && < 4.21,
+    base                    >= 4.11    && < 4.22,
     base-orphans,
     bytestring              >= 0.10.4  && < 0.13,
     text                    >= 1.1     && < 2.2,

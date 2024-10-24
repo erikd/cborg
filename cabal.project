@@ -5,6 +5,24 @@ packages:
   binary-serialise-cbor/
   cborg-json/
 
--- Needed for serialise benchmarks
-allow-newer:
-  store-core:text
+if impl (ghc >= 9.12)
+  allow-newer:
+    , assoc:base
+    , bytestring:base
+    , data-fix:base
+    , generically:base
+    , hashable:base
+    , indexed-traversable:base
+    , indexed-traversable-instances:base
+    , integer-conversion:base
+    , integer-logarithms:base
+    , quickcheck-instances:base
+    , OneTuple:base
+    , scientific:base
+    , semialign:base
+    , splitmix:base
+    , text-short:base
+    , these:base
+    , time-compat:base
+    , time-compat:time
+    , unix:time
