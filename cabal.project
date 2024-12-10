@@ -5,6 +5,36 @@ packages:
   binary-serialise-cbor/
   cborg-json/
 
--- Needed for serialise benchmarks
-allow-newer:
-  store-core:text
+if impl (ghc >= 9.12)
+  allow-newer:
+    , aeson:ghc-prim
+    , aeson:template-haskell
+    , assoc:base
+    , bifunctors:template-haskell
+    , bytestring:base
+    , bytestring:template-haskell
+    , data-fix:base
+    , generically:base
+    , hashable:base
+    , indexed-traversable:base
+    , indexed-traversable-instances:base
+    , integer-conversion:base
+    , integer-logarithms:base
+    , integer-logarithms:ghc-prim
+    , quickcheck-instances:base
+    , OneTuple:base
+    , scientific:base
+    , scientific:template-haskell
+    , semialign:base
+    , splitmix:base
+    , text-short:base
+    , text-short:ghc-prim
+    , text-short:template-haskell
+    , these:base
+    , th-abstraction:template-haskell
+    , th-compat:template-haskell
+    , time-compat:base
+    , time-compat:time
+    , unix:time
+    , unordered-containers:template-haskell
+    , uuid-types:template-haskell
